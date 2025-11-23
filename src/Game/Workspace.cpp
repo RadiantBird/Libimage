@@ -1,17 +1,15 @@
 #include "Workspace.hpp"
 
-Workspace::Workspace() : playerIndex(0), gravity(0, -98.1f, 0) {}  // ← -196.2f → -9.81f
+Workspace::Workspace() : playerIndex(0), gravity(0, -98.0f, 0) {}
 
 void Workspace::initScene(unsigned int skyboxTexID) {
     cubes.clear();
 
-    //もしかしてテクスチャは正方形じゃないと正しく描画できない？
     // 0: Player
     cubes.push_back(
         CubeBuilder()
             .size(4, 6, 2)
             .pos(0, 10, 0) // 地面より上に配置
-            .color(255, 255, 255) // 【重要】テクスチャの色をそのまま表示するため白
             .texture("assets/textures/noob.jpg")
             .setPlayer()
             .build()
@@ -35,7 +33,7 @@ void Workspace::initScene(unsigned int skyboxTexID) {
             .size(10, 10, 10)
             .pos(5, 10, 20)
             .color(255, 255, 255) // 【修正】テクスチャがある場合は白
-            .texture("assets/textures/floppa_face.jpg") // テクスチャパスを指定
+            .texture("assets/textures/floppa_face_2048.jpg") // テクスチャパスを指定
             .build()
     );
 

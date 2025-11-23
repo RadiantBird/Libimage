@@ -6,6 +6,7 @@
 #include <tuple> 
 #include <cmath> 
 #include <algorithm>
+#include <cstring> // strstr用に追加
 
 #define GL_SILENCE_DEPRECATION
 #include <GL/glew.h> 
@@ -107,23 +108,43 @@ unsigned int Renderer::loadTexture(const char* filename) {
     glGenTextures(1,&tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-    
     int w,h,nc;
     stbi_set_flip_vertically_on_load(true);
     unsigned char *data = stbi_load(filename,&w,&h,&nc,0);
     
     if(data){
-        std::cout << "✓ Texture loaded: " << filename << " (" << w << "x" << h << ", " << nc << " channels)" << std::endl;
+        std::cout << "✓ Texture loaded: " << filename << " (" << w << "x" << h << ", " << nc << " channels)";
+        
+        // 2の累乗かチェック
+        bool isPowerOfTwo = ((w & (w - 1)) == 0) && ((h & (h - 1)) == 0);
+        
+        // 警告表示
+        if (!isPowerOfTwo) {
+            std::cout << " [WARNING: Not power-of-two]";
+        }
+        if (w > 2048 || h > 2048) {
+            std::cout << " [WARNING: Very large texture, consider resizing to 2048x2048 or smaller]";
+        }
+        std::cout << std::endl;
+        
         GLenum fmt = (nc==1?GL_RED:(nc==3?GL_RGB:GL_RGBA));
+        
+        // テクスチャパラメータの設定（NPOT対応）
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        
         glTexImage2D(GL_TEXTURE_2D, 0, fmt, w, h, 0, fmt, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
     } else {
         std::cerr << "✗ Failed to load texture: " << filename << std::endl;
-        // 白テクスチャの代わりに目立つ色（マゼンタ）を使用
+        
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        
         unsigned char magenta[] = { 255, 0, 255 };
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, magenta);
     }
@@ -132,20 +153,31 @@ unsigned int Renderer::loadTexture(const char* filename) {
 }
 
 void Renderer::init() {
-    glEnable(GL_DEPTH_TEST); 
+    // OpenGL情報を出力
+    std::cout << "\n=== OpenGL Info ===" << std::endl;
+    std::cout << "Vendor: " << glGetString(GL_VENDOR) << std::endl;
+    std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
+    std::cout << "Version: " << glGetString(GL_VERSION) << std::endl;
     
-    // カリングを無効化（両面描画）
+    GLint maxTextureSize;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    std::cout << "Max Texture Size: " << maxTextureSize << "x" << maxTextureSize << std::endl;
+    
+    const char* extensions = (const char*)glGetString(GL_EXTENSIONS);
+    bool supportsNPOT = (strstr(extensions, "GL_ARB_texture_non_power_of_two") != nullptr);
+    std::cout << "Non-Power-of-Two Textures: " << (supportsNPOT ? "SUPPORTED" : "NOT SUPPORTED") << std::endl;
+    std::cout << "===================\n" << std::endl;
+    
+    glEnable(GL_DEPTH_TEST); 
     glDisable(GL_CULL_FACE);
     
-    // 【テスト】ライティングを一旦無効化してテクスチャの色を確認
+    // ライティングを有効化（テクスチャに陰影がつく）
     glEnable(GL_LIGHTING);
     glEnable(GL_COLOR_MATERIAL);
 
     cachedWhiteTextureID = createWhiteTexture();
-    
-    setupLights(); // ライトの設定は残しておく（後で有効化する場合のため）
-    
-    glClearColor(0.53f, 0.81f, 0.92f, 1.0f); // 空色の背景
+    setupLights();
+    glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
 }
 
 unsigned int Renderer::getTextureID(const std::string& filename) {

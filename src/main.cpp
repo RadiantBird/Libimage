@@ -90,7 +90,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     // ズーム距離を制限（近づきすぎ・離れすぎを防ぐ）
     mouseState.zoomDistance = std::max(10.0f, std::min(500.0f, mouseState.zoomDistance));
     
-    std::cout << "Zoom distance: " << mouseState.zoomDistance << std::endl;
+    //std::cout << "Zoom distance: " << mouseState.zoomDistance << std::endl;
 }
 
 int main(){
@@ -130,7 +130,7 @@ int main(){
     workspace.initScene(renderer.getSkyboxTextureID());
 
     float lastTime = glfwGetTime();
-    bool isFreeCam = true;
+    bool isFreeCam = false;
     bool pKeyBlock = false; 
 
     bool firstFrame = true;
@@ -189,7 +189,7 @@ int main(){
             if(glfwGetKey(win,GLFW_KEY_S)) targetV -= flatF * speed;
             if(glfwGetKey(win,GLFW_KEY_A)) targetV -= flatR * speed;
             if(glfwGetKey(win,GLFW_KEY_D)) targetV += flatR * speed;
-            if(glfwGetKey(win,GLFW_KEY_SPACE) && player->onGround) targetV.y = 200.0f;
+            if(glfwGetKey(win,GLFW_KEY_SPACE) && player->onGround) targetV.y = 50.0f;
 
             player->velocity.x += (targetV.x - player->velocity.x) * 0.1f;
             player->velocity.z += (targetV.z - player->velocity.z) * 0.1f;

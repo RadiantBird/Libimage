@@ -1,158 +1,342 @@
 #include "Physics.hpp"
 #include <iostream>
 #include <algorithm>
-#include <cmath> // std::abs, std::max, M_PI のために追加/確認
+#include <cmath>
+#include <vector>
+
+// ====================================================================
+// ヘルパー関数 (変更なし)
+// ====================================================================
+
+std::vector<Vector3> getOBBVertices(const Cube& cube) {
+    std::vector<Vector3> vertices;
+    Vector3 half = cube.size * 0.5f;
+    Matrix3 R = Matrix3::rotate(cube.rotation);
+    Vector3 localVerts[8] = {
+        Vector3(-half.x, -half.y, -half.z), Vector3( half.x, -half.y, -half.z),
+        Vector3( half.x,  half.y, -half.z), Vector3(-half.x,  half.y, -half.z),
+        Vector3(-half.x, -half.y,  half.z), Vector3( half.x, -half.y,  half.z),
+        Vector3( half.x,  half.y,  half.z), Vector3(-half.x,  half.y,  half.z)
+    };
+    for(int i = 0; i < 8; i++) vertices.push_back(cube.pos + R * localVerts[i]);
+    return vertices;
+}
+
+void getOBBAxes(const Cube& cube, Vector3 axes[3]) {
+    Matrix3 R = Matrix3::rotate(cube.rotation);
+    axes[0] = R * Vector3(1, 0, 0);
+    axes[1] = R * Vector3(0, 1, 0);
+    axes[2] = R * Vector3(0, 0, 1);
+}
+
+void projectVertices(const std::vector<Vector3>& vertices, const Vector3& axis, float& min, float& max) {
+    min = max = vertices[0].dot(axis);
+    for(size_t i = 1; i < vertices.size(); i++) {
+        float proj = vertices[i].dot(axis);
+        if(proj < min) min = proj;
+        if(proj > max) max = proj;
+    }
+}
+
+bool testSeparatingAxis(const std::vector<Vector3>& vertsA, const std::vector<Vector3>& vertsB,
+                        const Vector3& axis, float& outPenetration) {
+    float minA, maxA, minB, maxB;
+    projectVertices(vertsA, axis, minA, maxA);
+    projectVertices(vertsB, axis, minB, maxB);
+    if(maxA < minB || maxB < minA) return false;
+    float overlap = std::min(maxA - minB, maxB - minA);
+    outPenetration = overlap;
+    return true;
+}
+
+// ====================================================================
+// Physics クラス実装
+// ====================================================================
 
 void Physics::simulate(Workspace& ws, float dt) {
-    const int subSteps = 16; // 精度向上のためステップ数を増やす
+    const int subSteps = 8;
     float subDt = dt / subSteps;
-    
-    Cube* player = ws.getPlayer();
-    if(player) player->onGround = false; // 毎フレームリセット
 
-    for(int step=0; step<subSteps; ++step){
-        // 1. 力の適用と積分 (位置・回転の更新)
-        for(auto &c : ws.cubes){
-            if(c.anchored) continue;
-            
-            // 重力
-            c.velocity += ws.gravity * subDt;
-            
-            // 空気抵抗 (減衰)
-            c.velocity *= 0.99f;
-            c.angularVelocity *= 0.98f; 
+    for (int step = 0; step < subSteps; ++step) {
+        integrateAcceleration(ws, subDt);
 
-            // 位置更新
-            c.pos += c.velocity * subDt;
-            
-            // 回転更新 (オイラー角への加算)
-            Vector3 deltaRot = c.angularVelocity * (subDt * 180.0f / M_PI);
-            c.rotation += deltaRot;
+        const int collisionIterations = 4;
+        for (int iter = 0; iter < collisionIterations; ++iter) {
+            for (size_t i = 0; i < ws.cubes.size(); ++i) {
+                for (size_t j = i + 1; j < ws.cubes.size(); ++j) {
+                    Cube& a = ws.cubes[i];
+                    Cube& b = ws.cubes[j];
 
-            if (c.isPlayer) {
-                // プレイヤーはY軸以外回転しない
-                c.angularVelocity.x = 0.0f;
-                c.angularVelocity.z = 0.0f;
-            }
-            // 慣性テンソルの更新
-            c.updateInertiaWorld();
-        }
+                    if (a.anchored && b.anchored) continue;
+                    if (a.isSleeping && b.isSleeping) continue;
 
-        // 2. 衝突検出と解決
-        for(size_t i=0; i<ws.cubes.size(); ++i){
-            Cube &a = ws.cubes[i];
-            for(size_t j=i+1; j<ws.cubes.size(); ++j){
-                Cube &b = ws.cubes[j];
-                if(a.anchored && b.anchored) continue;
+                    if (!broadPhaseAABB(a, b)) continue;
 
-                Contact contact;
-                if(detectCollision(a, b, contact)){
-                    
-                    // === 修正点 1: 接地判定ロジックの修正 ===
-                    // Aがプレイヤーの場合、法線が下向き(-Y方向)であれば接地。
-                    if(a.isPlayer && contact.normal.y < -0.7f) a.onGround = true;
-                    // Bがプレイヤーの場合、法線が上向き(+Y方向)であれば接地。
-                    if(b.isPlayer && contact.normal.y > 0.7f) b.onGround = true;
-                    // ===================================
+                    Contact contact;
+                    if (detectOBBCollision(a, b, contact)) {
+                        if(a.isSleeping) a.wakeUp();
+                        if(b.isSleeping) b.wakeUp();
 
-                    resolveCollision(a, b, contact);
+                        if(a.isPlayer && contact.normal.y < -0.7f) a.onGround = true;
+                        if(b.isPlayer && contact.normal.y > 0.7f) b.onGround = true;
+
+                        resolveCollision(a, b, contact);
+                        correctPosition(a, b, contact);
+                    }
                 }
             }
         }
+        integrateVelocity(ws, subDt);
     }
 }
 
-// AABB同士の衝突判定 (戻り値: 衝突したかどうか)
-bool Physics::detectCollision(const Cube& a, const Cube& b, Contact& outContact) {
-    Vector3 delta = b.pos - a.pos;
-    Vector3 overlap(
-        (a.size.x + b.size.x)/2.0f - std::abs(delta.x),
-        (a.size.y + b.size.y)/2.0f - std::abs(delta.y),
-        (a.size.z + b.size.z)/2.0f - std::abs(delta.z)
-    );
+void Physics::integrateAcceleration(Workspace& ws, float dt) {
+    const float sleepVelThreshold = 0.4f;
+    const float sleepAngThreshold = 0.4f;
+    const float sleepTimeThreshold = 0.5f;
 
-    if (overlap.x > 0 && overlap.y > 0 && overlap.z > 0) {
-        // 最も浅い軸を法線とする
-        if (overlap.x < overlap.y && overlap.x < overlap.z) {
-            outContact.normal = Vector3(delta.x > 0 ? 1 : -1, 0, 0);
-            outContact.penetration = overlap.x;
-        } else if (overlap.y < overlap.z) {
-            outContact.normal = Vector3(0, delta.y > 0 ? 1 : -1, 0);
-            outContact.penetration = overlap.y;
-        } else {
-            outContact.normal = Vector3(0, 0, delta.z > 0 ? 1 : -1);
-            outContact.penetration = overlap.z;
+    for (auto& c : ws.cubes) {
+        if (c.anchored || c.isSleeping) continue;
+
+        c.velocity += ws.gravity * dt;
+
+        // 減衰処理 (Damping)
+        c.velocity *= 0.999f; 
+        c.angularVelocity *= 0.98f; // 回転は強めに減衰させる
+
+        // 【重要】角速度のハードリミット (Max Angular Velocity)
+        // ここで回転速度の上限を決め打ちします。発散防止の最後の砦です。
+        const float maxAngVel = 10.0f; // 最大でも毎秒1.5回転程度に抑える
+        if (c.angularVelocity.lengthSquared() > maxAngVel * maxAngVel) {
+            c.angularVelocity = c.angularVelocity.normalized() * maxAngVel;
         }
+
+        // スリープ判定
+        if (!c.isPlayer) {
+            if (c.velocity.lengthSquared() < sleepVelThreshold * sleepVelThreshold &&
+                c.angularVelocity.lengthSquared() < sleepAngThreshold * sleepAngThreshold) {
+                c.sleepTimer += dt;
+                if (c.sleepTimer > sleepTimeThreshold) {
+                    c.isSleeping = true;
+                    c.velocity = Vector3(0,0,0);
+                    c.angularVelocity = Vector3(0,0,0);
+                }
+            } else {
+                c.sleepTimer = 0.0f;
+            }
+        }
+
+        c.updateInertiaWorld();
         
-        // 衝突点の簡易推定
-        Vector3 halfA = a.size * 0.5f;
-        Vector3 minA = a.pos - halfA;
-        Vector3 maxA = a.pos + halfA;
-        Vector3 halfB = b.size * 0.5f;
-        Vector3 minB = b.pos - halfB;
-        Vector3 maxB = b.pos + halfB;
-
-        Vector3 intersectMin(
-            std::max(minA.x, minB.x),
-            std::max(minA.y, minB.y),
-            std::max(minA.z, minB.z)
-        );
-        Vector3 intersectMax(
-            std::min(maxA.x, maxB.x),
-            std::min(maxA.y, maxB.y),
-            std::min(maxA.z, maxB.z)
-        );
-        outContact.point = (intersectMin + intersectMax) * 0.5f;
-
-        return true;
+        if (c.isPlayer) {
+            c.angularVelocity = Vector3(0,0,0);
+            c.rotation.x = 0; c.rotation.z = 0;
+            c.onGround = false;
+        }
     }
-    return false;
 }
 
-// インパルスベースの衝突応答
+void Physics::integrateVelocity(Workspace& ws, float dt) {
+    for (auto& c : ws.cubes) {
+        if (c.anchored || c.isSleeping) continue;
+
+        c.pos += c.velocity * dt;
+
+        if (!c.isPlayer && c.angularVelocity.lengthSquared() > 1e-8f) {
+            Matrix3 R = Matrix3::rotate(c.rotation);
+            Matrix3 omegaStar;
+            omegaStar.setZero();
+            omegaStar.m[0][1] = -c.angularVelocity.z; omegaStar.m[0][2] = c.angularVelocity.y;
+            omegaStar.m[1][0] = c.angularVelocity.z;  omegaStar.m[1][2] = -c.angularVelocity.x;
+            omegaStar.m[2][0] = -c.angularVelocity.y; omegaStar.m[2][1] = c.angularVelocity.x;
+
+            Matrix3 dR = omegaStar * R;
+            R = R + (dR * dt);
+            R.orthonormalize();
+            c.rotation = R.toEuler();
+        }
+    }
+}
+
+bool Physics::broadPhaseAABB(const Cube& a, const Cube& b) {
+    float scale = 1.732f;
+    Vector3 sizeA = a.size * scale;
+    Vector3 sizeB = b.size * scale;
+    return (std::abs(a.pos.x - b.pos.x) < (sizeA.x + sizeB.x) * 0.5f) &&
+           (std::abs(a.pos.y - b.pos.y) < (sizeA.y + sizeB.y) * 0.5f) &&
+           (std::abs(a.pos.z - b.pos.z) < (sizeA.z + sizeB.z) * 0.5f);
+}
+
+bool Physics::detectOBBCollision(const Cube& a, const Cube& b, Contact& outContact) {
+    std::vector<Vector3> vertsA = getOBBVertices(a);
+    std::vector<Vector3> vertsB = getOBBVertices(b);
+    Vector3 axesA[3], axesB[3];
+    getOBBAxes(a, axesA);
+    getOBBAxes(b, axesB);
+
+    float minPen = 1e10f;
+    Vector3 bestAxis;
+    bool found = false;
+
+    std::vector<Vector3> axes;
+    for(int i=0; i<3; i++) axes.push_back(axesA[i]);
+    for(int i=0; i<3; i++) axes.push_back(axesB[i]);
+
+    const float crossThreshold = 1e-4f;
+    for(int i=0; i<3; i++) {
+        for(int j=0; j<3; j++) {
+            Vector3 cross = axesA[i].cross(axesB[j]);
+            if(cross.lengthSquared() > crossThreshold) {
+                axes.push_back(cross.normalized());
+            }
+        }
+    }
+
+    for(size_t i=0; i<axes.size(); i++) {
+        float pen;
+        if(!testSeparatingAxis(vertsA, vertsB, axes[i], pen)) return false; 
+        if (i >= 6) pen *= 1.05f; // バイアス
+
+        if(pen < minPen) {
+            minPen = pen;
+            bestAxis = axes[i];
+            found = true;
+        }
+    }
+
+    if (!found) return false;
+
+    Vector3 dir = b.pos - a.pos;
+    if(bestAxis.dot(dir) < 0) bestAxis = bestAxis * -1.0f;
+
+    outContact.normal = bestAxis;
+    outContact.penetration = minPen;
+    outContact.point = findContactPoint(a, b, bestAxis);
+
+    return true;
+}
+
+Vector3 Physics::findContactPoint(const Cube& a, const Cube& b, const Vector3& normal) {
+    auto getAverageContact = [&](const Cube& c, const Vector3& n) {
+        std::vector<Vector3> verts = getOBBVertices(c);
+        float maxDist = -1e20f;
+        for(const auto& v : verts) {
+            float d = v.dot(n);
+            if(d > maxDist) maxDist = d;
+        }
+        const float threshold = 0.15f; 
+        Vector3 sum(0,0,0);
+        int count = 0;
+        for(const auto& v : verts) {
+            if(v.dot(n) >= maxDist - threshold) {
+                sum += v; count++;
+            }
+        }
+        return (count > 0) ? (sum / (float)count) : verts[0];
+    };
+    Vector3 pA = getAverageContact(a, normal);
+    Vector3 pB = getAverageContact(b, normal * -1.0f);
+    return (pA + pB) * 0.5f;
+}
+
 void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
     Vector3 n = contact.normal;
-    
-    // 重心から衝突点へのベクトル
-    Vector3 ra = contact.point - a.pos;
-    Vector3 rb = contact.point - b.pos;
+    Vector3 rA = contact.point - a.pos;
+    Vector3 rB = contact.point - b.pos;
 
-    // 1. 相対速度の計算
-    Vector3 va = a.getPointVelocity(contact.point);
-    Vector3 vb = b.getPointVelocity(contact.point);
-    Vector3 relVel = vb - va;
+    Vector3 vA = a.velocity + a.angularVelocity.cross(rA);
+    Vector3 vB = b.velocity + b.angularVelocity.cross(rB);
+    Vector3 relVel = vB - vA;
 
     float velAlongNormal = relVel.dot(n);
-
-    // 既に離れようとしているなら何もしない
     if (velAlongNormal > 0) return;
 
-    // 2. インパルス(撃力)の大きさ j の計算
-    float raLn = ra.cross(n).dot(a.invInertiaTensorWorld * ra.cross(n));
-    float rbLn = rb.cross(n).dot(b.invInertiaTensorWorld * rb.cross(n));
+    Vector3 rAxN = rA.cross(n);
+    Vector3 rBxN = rB.cross(n);
     
-    float invMassSum = a.invMass + b.invMass + raLn + rbLn;
+    // 回転成分（慣性）の寄与
+    float angA = (a.invInertiaTensorWorld * rAxN).cross(rA).dot(n);
+    float angB = (b.invInertiaTensorWorld * rBxN).cross(rB).dot(n);
+
+    float invMassSum = a.invMass + b.invMass;
+    
+    // 【重要】衝突解決において、回転成分の寄与をそのまま使うと、
+    // 軽い物体が弾き飛ばされすぎるため、ここで回転の寄与を制限するハックを入れることも可能ですが、
+    // GameData側で慣性テンソルを10倍にしたので、ここでは標準的に加算します。
+    if(!a.anchored) invMassSum += angA;
+    if(!b.anchored) invMassSum += angB;
+
+    if (invMassSum < 1e-6f) return;
+
+    // 反発係数 (Restitution)
     float e = std::min(a.restitution, b.restitution);
+    
+    // 低速時の反発抑制 (Stabilization)
+    bool isStabilizing = false;
+    if (std::abs(velAlongNormal) < 1.0f) { 
+        e = 0.0f;
+        isStabilizing = true;
+    }
 
     float j = -(1.0f + e) * velAlongNormal / invMassSum;
-
     Vector3 impulse = n * j;
 
-    // 3. 速度と角速度の更新
+    // 速度更新
     if (!a.anchored) {
         a.velocity -= impulse * a.invMass;
-        a.angularVelocity -= a.invInertiaTensorWorld * ra.cross(impulse);
+        // 安定化時は回転させない
+        if (!isStabilizing) a.angularVelocity -= a.invInertiaTensorWorld * rA.cross(impulse);
+        else a.angularVelocity *= 0.8f; // 強制減衰
     }
     if (!b.anchored) {
         b.velocity += impulse * b.invMass;
-        b.angularVelocity += b.invInertiaTensorWorld * rb.cross(impulse);
+        if (!isStabilizing) b.angularVelocity += b.invInertiaTensorWorld * rB.cross(impulse);
+        else b.angularVelocity *= 0.8f;
     }
 
-    // 4. 位置補正 (めり込み解消)
-    float percent = 0.4f; 
-    float slop = 0.01f;   
-    Vector3 correction = n * (std::max(contact.penetration - slop, 0.0f) / (a.invMass + b.invMass) * percent);
+    // 摩擦 (Friction)
+    // 摩擦が回転加速の主原因になりやすいため、簡易版を使用
+    Vector3 t = relVel - n * velAlongNormal;
+    if (t.lengthSquared() > 1e-6f) {
+        t = t.normalized();
+        
+        // 摩擦インパルスの簡易計算
+        float jt = -relVel.dot(t) / invMassSum; // 法線と同じ分母を使う（近似）
+        
+        float mu = std::sqrt(a.friction * b.friction);
+        float maxFriction = std::abs(j) * mu;
+        if (std::abs(jt) > maxFriction) jt = (jt > 0) ? maxFriction : -maxFriction;
+
+        Vector3 frictionImpulse = t * jt;
+        
+        if (!a.anchored) {
+            a.velocity -= frictionImpulse * a.invMass;
+            // 【重要】摩擦によるトルク（回転）を弱める
+            // これが「回転加速」を止めるのに効果的です。0.1倍にするなど極端に弱めてOKです。
+            if(!isStabilizing) {
+                a.angularVelocity -= (a.invInertiaTensorWorld * rA.cross(frictionImpulse)) * 0.1f; 
+            }
+        }
+        if (!b.anchored) {
+            b.velocity += frictionImpulse * b.invMass;
+            if(!isStabilizing) {
+                b.angularVelocity += (b.invInertiaTensorWorld * rB.cross(frictionImpulse)) * 0.1f;
+            }
+        }
+    }
+}
+
+// --- 位置補正 (沈み込み防止) ---
+void Physics::correctPosition(Cube& a, Cube& b, const Contact& contact) {
+    // 【重要】補正率を下げる (0.8 -> 0.2)
+    // ここが高いと、めり込みを急激に直そうとして「エネルギー注入」が起きます。
+    // マイルドに時間をかけて直すことで、発散を防ぎます。
+    const float percent = 0.2f; 
+    const float slop = 0.01f;
+
+    float correctionMag = std::max(contact.penetration - slop, 0.0f) * percent / (a.invMass + b.invMass);
+    Vector3 correction = contact.normal * correctionMag;
     
-    if (!a.anchored) a.pos -= correction * a.invMass;
-    if (!b.anchored) b.pos += correction * b.invMass;
+    if(!a.anchored) a.pos -= correction * a.invMass;
+    if(!b.anchored) b.pos += correction * b.invMass;
 }

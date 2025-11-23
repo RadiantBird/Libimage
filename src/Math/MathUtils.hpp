@@ -5,6 +5,10 @@
 #include <cmath>
 #include <algorithm>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
 struct Matrix3 {
     float m[3][3];
 
@@ -40,11 +44,42 @@ struct Matrix3 {
         return res;
     }
 
+    // --- 追加: スカラー倍 (Matrix * float) ---
+    Matrix3 operator*(float s) const {
+        Matrix3 res;
+        for(int i=0; i<3; i++) for(int j=0; j<3; j++) res.m[i][j] = m[i][j] * s;
+        return res;
+    }
+
+    // --- 追加: 行列の加算 (Matrix + Matrix) ---
+    Matrix3 operator+(const Matrix3& other) const {
+        Matrix3 res;
+        for(int i=0; i<3; i++) for(int j=0; j<3; j++) res.m[i][j] = m[i][j] + other.m[i][j];
+        return res;
+    }
+
     // 転置行列
     Matrix3 transpose() const {
         Matrix3 res;
         for(int i=0; i<3; i++) for(int j=0; j<3; j++) res.m[i][j] = m[j][i];
         return res;
+    }
+
+    // --- 追加: 正規直交化 (回転行列の誤差蓄積を補正) ---
+    void orthonormalize() {
+        // 列ベクトルとして取り出す
+        Vector3 x(m[0][0], m[1][0], m[2][0]);
+        Vector3 y(m[0][1], m[1][1], m[2][1]);
+        Vector3 z;
+
+        x = x.normalized();
+        z = x.cross(y).normalized(); // Z軸を再計算 (XとYに垂直)
+        y = z.cross(x).normalized(); // Y軸を再計算 (ZとXに垂直)
+
+        // 行列に戻す
+        m[0][0]=x.x; m[1][0]=x.y; m[2][0]=x.z;
+        m[0][1]=y.x; m[1][1]=y.y; m[2][1]=y.z;
+        m[0][2]=z.x; m[1][2]=z.y; m[2][2]=z.z;
     }
 
     // オイラー角(度数法)から回転行列を作成
@@ -64,6 +99,28 @@ struct Matrix3 {
 
         // Z * Y * X の順で適用 (一般的なオイラー角順序)
         return mZ * mY * mX;
+    }
+
+    // --- 追加: 回転行列からオイラー角(度数法)を復元 ---
+    Vector3 toEuler() const {
+        Vector3 angle;
+        // Z * Y * X 行列の成分から逆算
+        // m[2][0] は -sin(y) に相当
+        float sy = -m[2][0];
+        float cy = sqrt(1.0f - sy * sy);
+
+        if (cy > 1e-6f) {
+            angle.x = atan2(m[2][1], m[2][2]);
+            angle.y = atan2(sy, cy);
+            angle.z = atan2(m[1][0], m[0][0]);
+        } else {
+            // ジンバルロック対策 (Y軸が+/-90度付近)
+            angle.x = atan2(-m[1][2], m[1][1]);
+            angle.y = atan2(sy, cy);
+            angle.z = 0.0f;
+        }
+        
+        return angle * (180.0f / M_PI);
     }
 };
 
