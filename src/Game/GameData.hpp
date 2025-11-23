@@ -4,6 +4,10 @@
 #include <vector>
 #include <tuple>
 #include <cmath>
+#include <functional>
+#include <string>
+#include <any>
+
 #include "src/Math/Vector3.hpp"
 #include "src/Math/MathUtils.hpp"
 
@@ -13,6 +17,42 @@ const float SCREEN_H = 600;
 const float FOV_Y = 60.0f;
 const float Z_NEAR = 0.1f;
 const float Z_FAR = 2000.0f;
+
+class Connection {
+public:
+    bool connected = true;
+    void disconnect() { connected = false; }
+};
+
+class EventBase {
+public:
+    using Callback = std::function<void(std::any)>;
+
+    std::vector<std::pair<Callback, Connection*>> listeners;
+
+    Connection* connect(Callback cb) {
+        auto* conn = new Connection();
+        listeners.emplace_back(cb, conn);
+        return conn;
+    }
+
+    void fire(std::any value = std::any()) {
+        for (auto it = listeners.begin(); it != listeners.end(); ) {
+            if (it->second->connected) {
+                it->first(value);
+                ++it;
+            } else {
+                it = listeners.erase(it);
+            }
+        }
+    }
+};
+
+struct RunService {
+    static EventBase Heartbeat;
+    // static EventBase Stepped;
+    // static EventBase RenderStepped;
+};
 
 struct Cube {
     Vector3 size, pos, color;
@@ -71,7 +111,7 @@ struct Cube {
                 // 【重要修正】慣性スケーリング係数 (Inertia Scaling)
                 // 物理的には1.0が正しいですが、ゲーム挙動安定のため 5.0〜10.0 倍にして
                 // 「回転に対する重さ」を水増しします。これで発散を防ぎます。
-                const float inertiaScale = 10.0f; 
+                const float inertiaScale = 5.0f; 
 
                 I.m[0][0] = (1.0f/12.0f) * mass * (size.y*size.y + size.z*size.z) * inertiaScale;
                 I.m[1][1] = (1.0f/12.0f) * mass * (size.x*size.x + size.z*size.z) * inertiaScale;

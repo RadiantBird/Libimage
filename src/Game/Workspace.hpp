@@ -19,4 +19,5 @@ public:
     Cube* getPlayer();
 };
 
+extern Workspace* global_workspace;
 #endif

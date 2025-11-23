@@ -1,12 +1,17 @@
-// コンパイルコマンド例:
 /* 
-g++ -I. -Isrc/Game -Isrc/Math -Isrc/Physics -Isrc/Render -I/opt/homebrew/include -L/opt/homebrew/lib -o engine \
-src/main.cpp \
-src/Game/Workspace.cpp \
-src/Physics/Physics.cpp \
-src/Render/Renderer.cpp \
-src/Render/Shader.cpp \
--framework OpenGL -lglfw -lGLEW -lm
+g++ -I. -std=c++17 \
+    -Isrc/Game -Isrc/Math -Isrc/Physics -Isrc/Render \
+    -I/opt/homebrew/include \
+    -L/opt/homebrew/lib \
+    -o engine \
+    src/main.cpp \
+    src/Game/Workspace.cpp \
+    src/Game/GameData.cpp \
+    src/Physics/Physics.cpp \
+    src/Render/Renderer.cpp \
+    src/Render/Shader.cpp \
+    src/Game/ScriptRunner.cpp \
+    -framework OpenGL -lglfw -lGLEW -lm -llua
 */
 
 #define GL_SILENCE_DEPRECATION
@@ -15,11 +20,14 @@ src/Render/Shader.cpp \
 #include <iostream>
 #include <algorithm>
 #include <tuple> 
+#include <thread>
+#include <atomic>
 
 #include "src/Game/GameData.hpp"
 #include "src/Game/Workspace.hpp"
 #include "src/Physics/Physics.hpp" 
 #include "src/Render/Renderer.hpp"
+#include "src/Game/ScriptRunner.hpp"
 
 // グローバル変数（マウス操作用）
 struct MouseState {
@@ -108,6 +116,9 @@ int main(){
     glfwMakeContextCurrent(win); 
     glfwSwapInterval(1);
     if (glewInit() != GLEW_OK) return -1;
+
+    //Luaの非同期実行
+    initLua();
 
     // マウスコールバックの設定
     glfwSetMouseButtonCallback(win, mouse_button_callback);
@@ -204,32 +215,33 @@ int main(){
             player->rotation.z = 0.0f;
         }
 
-        if (firstFrame) {
-            std::cout << "=== Debug Info ===" << std::endl;
-            std::cout << "Camera pos: " << mainCamera.pos.x << ", " << mainCamera.pos.y << ", " << mainCamera.pos.z << std::endl;
-            std::cout << "Camera rot: " << mainCamera.rotation.x << ", " << mainCamera.rotation.y << ", " << mainCamera.rotation.z << std::endl;
-            std::cout << "Number of cubes: " << workspace.cubes.size() << std::endl;
-            if (workspace.cubes.size() > 1) {
-                const Cube& ground = workspace.cubes[1];
-                std::cout << "Ground pos: " << ground.pos.x << ", " << ground.pos.y << ", " << ground.pos.z << std::endl;
-                std::cout << "Ground size: " << ground.size.x << ", " << ground.size.y << ", " << ground.size.z << std::endl;
-                std::cout << "Ground texture: " << (ground.texturePath.empty() ? "none" : ground.texturePath) << std::endl;
-            }
-            if (player) {
-                std::cout << "Player pos: " << player->pos.x << ", " << player->pos.y << ", " << player->pos.z << std::endl;
-            }
-            std::cout << "\n=== Controls ===" << std::endl;
-            std::cout << "P: Toggle Free Cam" << std::endl;
-            std::cout << "WASD: Move" << std::endl;
-            std::cout << "Q/E: Up/Down (Free Cam only)" << std::endl;
-            std::cout << "Arrow Keys: Rotate camera" << std::endl;
-            std::cout << "Right Click + Drag: Rotate camera" << std::endl;
-            std::cout << "Mouse Wheel: Zoom in/out" << std::endl;
-            std::cout << "==================" << std::endl;
-            firstFrame = false;
-        }
+        // if (firstFrame) {
+        //     std::cout << "=== Debug Info ===" << std::endl;
+        //     std::cout << "Camera pos: " << mainCamera.pos.x << ", " << mainCamera.pos.y << ", " << mainCamera.pos.z << std::endl;
+        //     std::cout << "Camera rot: " << mainCamera.rotation.x << ", " << mainCamera.rotation.y << ", " << mainCamera.rotation.z << std::endl;
+        //     std::cout << "Number of cubes: " << workspace.cubes.size() << std::endl;
+        //     if (workspace.cubes.size() > 1) {
+        //         const Cube& ground = workspace.cubes[1];
+        //         std::cout << "Ground pos: " << ground.pos.x << ", " << ground.pos.y << ", " << ground.pos.z << std::endl;
+        //         std::cout << "Ground size: " << ground.size.x << ", " << ground.size.y << ", " << ground.size.z << std::endl;
+        //         std::cout << "Ground texture: " << (ground.texturePath.empty() ? "none" : ground.texturePath) << std::endl;
+        //     }
+        //     if (player) {
+        //         std::cout << "Player pos: " << player->pos.x << ", " << player->pos.y << ", " << player->pos.z << std::endl;
+        //     }
+        //     std::cout << "\n=== Controls ===" << std::endl;
+        //     std::cout << "P: Toggle Free Cam" << std::endl;
+        //     std::cout << "WASD: Move" << std::endl;
+        //     std::cout << "Q/E: Up/Down (Free Cam only)" << std::endl;
+        //     std::cout << "Arrow Keys: Rotate camera" << std::endl;
+        //     std::cout << "Right Click + Drag: Rotate camera" << std::endl;
+        //     std::cout << "Mouse Wheel: Zoom in/out" << std::endl;
+        //     std::cout << "==================" << std::endl;
+        //     firstFrame = false;
+        // }
 
         physics.simulate(workspace, dt);
+        RunService::Heartbeat.fire(dt);
         renderer.render(workspace, mainCamera, lookTarget);
 
         glfwSwapBuffers(win);

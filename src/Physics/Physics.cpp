@@ -102,11 +102,18 @@ void Physics::integrateAcceleration(Workspace& ws, float dt) {
 
         // 減衰処理 (Damping)
         c.velocity *= 0.999f; 
-        c.angularVelocity *= 0.98f; // 回転は強めに減衰させる
+        
+        // 【修正1】角運動の極限減衰 (0.98f -> 0.90f)
+        // 外部から何も力が加わっていなくても、極めて積極的エネルギーを奪い、収束させる
+        c.angularVelocity *= 0.90f; 
 
-        // 【重要】角速度のハードリミット (Max Angular Velocity)
-        // ここで回転速度の上限を決め打ちします。発散防止の最後の砦です。
-        const float maxAngVel = 10.0f; // 最大でも毎秒1.5回転程度に抑える
+        // 【追加】ごく低速時の強制停止 (Jitter/微振動を即座に殺す)
+        if (c.velocity.lengthSquared() < 0.01f) c.velocity = Vector3(0,0,0);
+        if (c.angularVelocity.lengthSquared() < 0.01f) c.angularVelocity = Vector3(0,0,0);
+
+
+        // 角速度のハードリミット (Max Angular Velocity)
+        const float maxAngVel = 10.0f; 
         if (c.angularVelocity.lengthSquared() > maxAngVel * maxAngVel) {
             c.angularVelocity = c.angularVelocity.normalized() * maxAngVel;
         }
@@ -224,6 +231,7 @@ Vector3 Physics::findContactPoint(const Cube& a, const Cube& b, const Vector3& n
             float d = v.dot(n);
             if(d > maxDist) maxDist = d;
         }
+        // 接触点閾値を0.15fに維持
         const float threshold = 0.15f; 
         Vector3 sum(0,0,0);
         int count = 0;
@@ -254,21 +262,16 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
     Vector3 rAxN = rA.cross(n);
     Vector3 rBxN = rB.cross(n);
     
-    // 回転成分（慣性）の寄与
     float angA = (a.invInertiaTensorWorld * rAxN).cross(rA).dot(n);
     float angB = (b.invInertiaTensorWorld * rBxN).cross(rB).dot(n);
 
     float invMassSum = a.invMass + b.invMass;
     
-    // 【重要】衝突解決において、回転成分の寄与をそのまま使うと、
-    // 軽い物体が弾き飛ばされすぎるため、ここで回転の寄与を制限するハックを入れることも可能ですが、
-    // GameData側で慣性テンソルを10倍にしたので、ここでは標準的に加算します。
     if(!a.anchored) invMassSum += angA;
     if(!b.anchored) invMassSum += angB;
 
     if (invMassSum < 1e-6f) return;
 
-    // 反発係数 (Restitution)
     float e = std::min(a.restitution, b.restitution);
     
     // 低速時の反発抑制 (Stabilization)
@@ -284,24 +287,23 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
     // 速度更新
     if (!a.anchored) {
         a.velocity -= impulse * a.invMass;
-        // 安定化時は回転させない
+        // ここを微調整して発散を防ぐよ
         if (!isStabilizing) a.angularVelocity -= a.invInertiaTensorWorld * rA.cross(impulse);
-        else a.angularVelocity *= 0.8f; // 強制減衰
+        else a.angularVelocity *= 0.95f; 
     }
     if (!b.anchored) {
         b.velocity += impulse * b.invMass;
         if (!isStabilizing) b.angularVelocity += b.invInertiaTensorWorld * rB.cross(impulse);
-        else b.angularVelocity *= 0.8f;
+        else b.angularVelocity *= 0.95f;
     }
 
     // 摩擦 (Friction)
-    // 摩擦が回転加速の主原因になりやすいため、簡易版を使用
     Vector3 t = relVel - n * velAlongNormal;
     if (t.lengthSquared() > 1e-6f) {
         t = t.normalized();
         
-        // 摩擦インパルスの簡易計算
-        float jt = -relVel.dot(t) / invMassSum; // 法線と同じ分母を使う（近似）
+        // 摩擦インパルスの簡易計算（安定性のための近似）
+        float jt = -relVel.dot(t) / invMassSum; 
         
         float mu = std::sqrt(a.friction * b.friction);
         float maxFriction = std::abs(j) * mu;
@@ -311,9 +313,9 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
         
         if (!a.anchored) {
             a.velocity -= frictionImpulse * a.invMass;
-            // 【重要】摩擦によるトルク（回転）を弱める
-            // これが「回転加速」を止めるのに効果的です。0.1倍にするなど極端に弱めてOKです。
+            // 【修正2-2】安定化時は摩擦トルクを完全に無視する (0.1fを維持)
             if(!isStabilizing) {
+                // 衝突が激しい時だけ、回転を大きく抑制しながら適用
                 a.angularVelocity -= (a.invInertiaTensorWorld * rA.cross(frictionImpulse)) * 0.1f; 
             }
         }
@@ -328,9 +330,7 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
 
 // --- 位置補正 (沈み込み防止) ---
 void Physics::correctPosition(Cube& a, Cube& b, const Contact& contact) {
-    // 【重要】補正率を下げる (0.8 -> 0.2)
-    // ここが高いと、めり込みを急激に直そうとして「エネルギー注入」が起きます。
-    // マイルドに時間をかけて直すことで、発散を防ぎます。
+    // 補正率をマイルドに維持 (0.2f)
     const float percent = 0.2f; 
     const float slop = 0.01f;
 

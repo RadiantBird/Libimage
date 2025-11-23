@@ -1,8 +1,10 @@
 #include "Workspace.hpp"
 
 Workspace::Workspace() : playerIndex(0), gravity(0, -98.0f, 0) {}
+Workspace* global_workspace = nullptr;
 
 void Workspace::initScene(unsigned int skyboxTexID) {
+    global_workspace = this;
     cubes.clear();
 
     // 0: Player
