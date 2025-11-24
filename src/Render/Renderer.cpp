@@ -71,11 +71,12 @@ namespace {
 Renderer::Renderer() : skyboxTextureID(0) {}
 
 Renderer::~Renderer() {
+    // 【修正】不要なキャストを削除
     for (auto const& [key, val] : textureCache) {
-        glDeleteTextures(1, (GLuint*)&val);
+        glDeleteTextures(1, &val);
     }
     if (cachedWhiteTextureID != 0) {
-        glDeleteTextures(1, (GLuint*)&cachedWhiteTextureID);
+        glDeleteTextures(1, &cachedWhiteTextureID);
     }
     textureCache.clear();
 }
@@ -108,18 +109,17 @@ unsigned int Renderer::loadTexture(const char* filename) {
     if(data){
         std::cout << "✓ Texture loaded: " << filename << " (" << w << "x" << h << ", " << nc << " channels)" << std::endl;
         
-        // 【修正】チャンネル数に応じた適切なフォーマット選択
+        // チャンネル数に応じた適切なフォーマット選択
         GLenum fmt;
         if (nc == 1) {
-            fmt = GL_LUMINANCE; // グレースケール (Legacy OpenGL)
+            fmt = GL_LUMINANCE;
         } else if (nc == 2) {
-            fmt = GL_LUMINANCE_ALPHA; // グレースケール + アルファ (Legacy OpenGL)
+            fmt = GL_LUMINANCE_ALPHA;
         } else if (nc == 3) {
             fmt = GL_RGB;
         } else if (nc == 4) {
             fmt = GL_RGBA;
         } else {
-            // 予期しないチャンネル数の場合、強制的にRGBAとして扱うかエラーにする
             fmt = GL_RGBA; 
             std::cerr << "Warning: Unexpected channel count " << nc << ", trying GL_RGBA." << std::endl;
         }
@@ -147,7 +147,7 @@ void Renderer::init() {
     glEnable(GL_LIGHTING);
     glEnable(GL_COLOR_MATERIAL);
 
-    // 透過処理（アルファブレンディング）の有効化
+    // 透過処理(アルファブレンディング)の有効化
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 

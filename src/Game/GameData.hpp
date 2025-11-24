@@ -31,6 +31,14 @@ public:
     using Callback = std::function<void(std::any)>;
     std::vector<std::pair<Callback, Connection*>> listeners;
 
+    // 【修正】デストラクタを追加してConnectionを解放
+    ~EventBase() {
+        for (auto& [cb, conn] : listeners) {
+            delete conn;
+        }
+        listeners.clear();
+    }
+
     Connection* connect(Callback cb) {
         auto* conn = new Connection();
         listeners.emplace_back(cb, conn);
@@ -43,6 +51,8 @@ public:
                 it->first(value);
                 ++it;
             } else {
+                // 【修正】切断されたConnectionを削除
+                delete it->second;
                 it = listeners.erase(it);
             }
         }
@@ -92,11 +102,11 @@ struct Cube : public Instance {
          unsigned int texID = 0, bool useTex = false, bool an = false, bool isPl = false,
          std::string name = "Part",
          bool canCol = true, bool sim = true,
-         float trans = 0.0f) // 引数追加
+         float trans = 0.0f)
          : Instance(name, "Part"),
            size(s), pos(p), color(c), rotation(r), 
            texturePath(texPath), textureID(texID), useTexture(useTex), anchored(an), 
-           canCollide(canCol), simulated(sim), transparency(trans), // 初期化
+           canCollide(canCol), simulated(sim), transparency(trans),
            velocity(0,0,0), angularVelocity(0,0,0), 
            isPlayer(isPl), onGround(false), 
            restitution(0.2f), friction(0.5f),
@@ -167,7 +177,6 @@ struct CubeBuilder {
     bool _canCollide = true;
     bool _simulated = true;
     
-    // 追加
     float _transparency = 0.0f;
 
     CubeBuilder& size(float x, float y, float z) { _size = Vector3(x,y,z); return *this; }
@@ -187,7 +196,6 @@ struct CubeBuilder {
     CubeBuilder& setCanCollide(bool enable) { _canCollide = enable; return *this; }
     CubeBuilder& setSimulated(bool enable) { _simulated = enable; return *this; }
 
-    // 透明度設定メソッド
     CubeBuilder& setTransparency(float t) { _transparency = t; return *this; }
 
     Cube build() {
@@ -196,7 +204,7 @@ struct CubeBuilder {
             _texturePath, _texID, _useTex,
             _anchored, _isPlayer, _name,
             _canCollide, _simulated,
-            _transparency // 追加
+            _transparency
         );
     }
 };
