@@ -154,19 +154,19 @@ unsigned int Renderer::loadTexture(const char* filename) {
 
 void Renderer::init() {
     // OpenGL情報を出力
-    std::cout << "\n=== OpenGL Info ===" << std::endl;
-    std::cout << "Vendor: " << glGetString(GL_VENDOR) << std::endl;
-    std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
-    std::cout << "Version: " << glGetString(GL_VERSION) << std::endl;
+    // std::cout << "\n=== OpenGL Info ===" << std::endl;
+    // std::cout << "Vendor: " << glGetString(GL_VENDOR) << std::endl;
+    // std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
+    // std::cout << "Version: " << glGetString(GL_VERSION) << std::endl;
     
-    GLint maxTextureSize;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-    std::cout << "Max Texture Size: " << maxTextureSize << "x" << maxTextureSize << std::endl;
+    // GLint maxTextureSize;
+    // glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    // std::cout << "Max Texture Size: " << maxTextureSize << "x" << maxTextureSize << std::endl;
     
-    const char* extensions = (const char*)glGetString(GL_EXTENSIONS);
-    bool supportsNPOT = (strstr(extensions, "GL_ARB_texture_non_power_of_two") != nullptr);
-    std::cout << "Non-Power-of-Two Textures: " << (supportsNPOT ? "SUPPORTED" : "NOT SUPPORTED") << std::endl;
-    std::cout << "===================\n" << std::endl;
+    // const char* extensions = (const char*)glGetString(GL_EXTENSIONS);
+    // bool supportsNPOT = (strstr(extensions, "GL_ARB_texture_non_power_of_two") != nullptr);
+    // std::cout << "Non-Power-of-Two Textures: " << (supportsNPOT ? "SUPPORTED" : "NOT SUPPORTED") << std::endl;
+    // std::cout << "===================\n" << std::endl;
     
     glEnable(GL_DEPTH_TEST); 
     glDisable(GL_CULL_FACE);

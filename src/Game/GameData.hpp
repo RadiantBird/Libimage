@@ -1,3 +1,4 @@
+// src/Game/GameData.hpp
 #ifndef GAMEDATA_HPP
 #define GAMEDATA_HPP
 
@@ -10,6 +11,7 @@
 
 #include "src/Math/Vector3.hpp"
 #include "src/Math/MathUtils.hpp"
+#include "src/Game/Instance.hpp"
 
 // 定数
 const float SCREEN_W = 800;
@@ -27,7 +29,6 @@ public:
 class EventBase {
 public:
     using Callback = std::function<void(std::any)>;
-
     std::vector<std::pair<Callback, Connection*>> listeners;
 
     Connection* connect(Callback cb) {
@@ -50,47 +51,45 @@ public:
 
 struct RunService {
     static EventBase Heartbeat;
-    // static EventBase Stepped;
-    // static EventBase RenderStepped;
 };
 
-struct Cube {
+// Cube は Instance を継承
+struct Cube : public Instance {
     Vector3 size, pos, color;
-    Vector3 rotation; // オイラー角 (度)
+    Vector3 rotation;
     
     std::string texturePath;
     unsigned int textureID;
     bool useTexture;
-    bool anchored; // 固定オブジェクトフラグ
+    bool anchored;
 
-    // --- 物理パラメータ ---
+    // 物理パラメータ
     Vector3 velocity;
-    Vector3 angularVelocity; // 角速度 (rad/s)
+    Vector3 angularVelocity;
     
     float mass, invMass;
     Matrix3 invInertiaTensorLocal;
     Matrix3 invInertiaTensorWorld;
     
-    float restitution;
-    float friction;
+    float restitution;  // ← 順序変更
+    float friction;     // ← 順序変更
     
     bool isPlayer;
     bool onGround;
-
-    // --- 追加: スリープ（休止）システム用 ---
-    bool isSleeping;
-    float sleepTimer; 
-    // ------------------------------------
+    bool isSleeping;    // ← 順序変更
+    float sleepTimer;   // ← 順序変更
 
     Cube(Vector3 s, Vector3 p, Vector3 c, Vector3 r = Vector3(0,0,0),
          const std::string& texPath = "",
-         unsigned int texID = 0, bool useTex = false, bool an = false, bool isPl = false)
-         : size(s), pos(p), color(c), rotation(r), 
+         unsigned int texID = 0, bool useTex = false, bool an = false, bool isPl = false,
+         std::string name = "Part")
+         : Instance(name, "Part"),
+           size(s), pos(p), color(c), rotation(r), 
            texturePath(texPath), textureID(texID), useTexture(useTex), anchored(an), 
            velocity(0,0,0), angularVelocity(0,0,0), 
            isPlayer(isPl), onGround(false), 
-           isSleeping(false), sleepTimer(0.0f), // 初期化
-           restitution(0.2f), friction(0.5f)
+           restitution(0.2f), friction(0.5f),  // ← 順序を修正
+           isSleeping(false), sleepTimer(0.0f)  // ← 最後に移動
     {
         if (an) {
             mass = 0.0f;
@@ -104,13 +103,9 @@ struct Cube {
             if (isPlayer) {
                 invInertiaTensorLocal.setZero();
             } else {
-                // 直方体の慣性モーメント
                 Matrix3 I;
                 I.setZero();
                 
-                // 【重要修正】慣性スケーリング係数 (Inertia Scaling)
-                // 物理的には1.0が正しいですが、ゲーム挙動安定のため 5.0〜10.0 倍にして
-                // 「回転に対する重さ」を水増しします。これで発散を防ぎます。
                 const float inertiaScale = 5.0f; 
 
                 I.m[0][0] = (1.0f/12.0f) * mass * (size.y*size.y + size.z*size.z) * inertiaScale;
@@ -118,7 +113,6 @@ struct Cube {
                 I.m[2][2] = (1.0f/12.0f) * mass * (size.x*size.x + size.y*size.y) * inertiaScale;
 
                 invInertiaTensorLocal.setZero();
-                // ゼロ除算防止
                 if(I.m[0][0] > 1e-6f) invInertiaTensorLocal.m[0][0] = 1.0f / I.m[0][0];
                 if(I.m[1][1] > 1e-6f) invInertiaTensorLocal.m[1][1] = 1.0f / I.m[1][1];
                 if(I.m[2][2] > 1e-6f) invInertiaTensorLocal.m[2][2] = 1.0f / I.m[2][2];
@@ -133,7 +127,6 @@ struct Cube {
         invInertiaTensorWorld = R * invInertiaTensorLocal * R.transpose();
     }
     
-    // スリープからの復帰
     void wakeUp() {
         isSleeping = false;
         sleepTimer = 0.0f;
@@ -142,6 +135,11 @@ struct Cube {
     Vector3 getPointVelocity(const Vector3& worldPoint) const {
         Vector3 r = worldPoint - pos;
         return velocity + angularVelocity.cross(r);
+    }
+
+    // IsA のオーバーライド
+    bool IsA(const std::string& className) const override {
+        return className == "Part" || className == "BasePart" || Instance::IsA(className);
     }
 };
 
@@ -155,6 +153,7 @@ struct CubeBuilder {
     bool _useTex = false;
     bool _anchored = false;
     bool _isPlayer = false;
+    std::string _name = "Part";
 
     CubeBuilder& size(float x, float y, float z) { _size = Vector3(x,y,z); return *this; }
     CubeBuilder& pos(float x, float y, float z) { _pos = Vector3(x,y,z); return *this; }
@@ -164,9 +163,10 @@ struct CubeBuilder {
     CubeBuilder& texture(unsigned int id) { _texID = id; _useTex = true; return *this; }
     CubeBuilder& setStatic() { _anchored = true; return *this; }
     CubeBuilder& setPlayer() { _isPlayer = true; return *this; }
+    CubeBuilder& setName(const std::string& s) { _name = s; return *this; }
 
     Cube build() {
-        return Cube(_size, _pos, _color, _rotation, _texturePath, _texID, _useTex, _anchored, _isPlayer);
+        return Cube(_size, _pos, _color, _rotation, _texturePath, _texID, _useTex, _anchored, _isPlayer, _name);
     }
 };
 
@@ -183,4 +183,4 @@ struct Camera {
     }
 };
 
-#endif
+#endif // GAMEDATA_HPP

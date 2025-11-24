@@ -20,8 +20,6 @@ g++ -I. -std=c++17 \
 #include <iostream>
 #include <algorithm>
 #include <tuple> 
-#include <thread>
-#include <atomic>
 
 #include "src/Game/GameData.hpp"
 #include "src/Game/Workspace.hpp"
@@ -35,35 +33,35 @@ struct MouseState {
     double lastY = 0.0;
     bool rightButtonPressed = false;
     bool firstMouse = true;
-    float zoomDistance = 100.0f; // カメラとプレイヤーの距離
+    float zoomDistance = 100.0f;
 } mouseState;
 
-// カメラへのポインタ（コールバックからアクセスするため）
 Camera* g_camera = nullptr;
 
-// マウスボタンコールバック
+// オプション変数
+bool Cursor_locked = true;
+bool Cursor_unlock = true;
+
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
             mouseState.rightButtonPressed = true;
             mouseState.firstMouse = true; // ドラッグ開始時にジャンプを防ぐ
             // カーソルを非表示にして画面中央に固定（オプション）
-            // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            if (Cursor_locked) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         } else if (action == GLFW_RELEASE) {
             mouseState.rightButtonPressed = false;
             // カーソルを表示に戻す（オプション）
-            // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            if (Cursor_unlock) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
     }
 }
 
-// マウス移動コールバック
 void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
     if (!mouseState.rightButtonPressed || !g_camera) {
         return;
     }
 
-    // 初回のマウス移動でジャンプを防ぐ
     if (mouseState.firstMouse) {
         mouseState.lastX = xpos;
         mouseState.lastY = ypos;
@@ -71,34 +69,24 @@ void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
         return;
     }
 
-    // マウスの移動量を計算
     double xoffset = xpos - mouseState.lastX;
-    double yoffset = mouseState.lastY - ypos; // Y座標は逆（上が正）
+    double yoffset = mouseState.lastY - ypos;
     mouseState.lastX = xpos;
     mouseState.lastY = ypos;
 
-    // マウス感度
     float sensitivity = 0.2f;
     xoffset *= sensitivity;
     yoffset *= sensitivity;
 
-    // カメラの回転を更新
-    g_camera->rotation.y -= xoffset; // Yaw（左右）
-    g_camera->rotation.x += yoffset; // Pitch（上下）
+    g_camera->rotation.y -= xoffset;
+    g_camera->rotation.x += yoffset;
 
-    // Pitchを制限（真上・真下を向きすぎないように）
     g_camera->rotation.x = std::max(-89.0f, std::min(89.0f, g_camera->rotation.x));
 }
 
-// マウスホイールコールバック
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-    // yoffset: 上にスクロール = 正、下にスクロール = 負
-    mouseState.zoomDistance -= yoffset * 10.0f; // 10.0fはズーム速度
-    
-    // ズーム距離を制限（近づきすぎ・離れすぎを防ぐ）
+    mouseState.zoomDistance -= yoffset * 10.0f;
     mouseState.zoomDistance = std::max(10.0f, std::min(500.0f, mouseState.zoomDistance));
-    
-    //std::cout << "Zoom distance: " << mouseState.zoomDistance << std::endl;
 }
 
 int main(){
@@ -117,9 +105,6 @@ int main(){
     glfwSwapInterval(1);
     if (glewInit() != GLEW_OK) return -1;
 
-    //Luaの非同期実行
-    initLua();
-
     // マウスコールバックの設定
     glfwSetMouseButtonCallback(win, mouse_button_callback);
     glfwSetCursorPosCallback(win, cursor_position_callback);
@@ -130,21 +115,23 @@ int main(){
     Physics physics;
     Camera mainCamera;
     
-    // グローバルポインタに設定（コールバックからアクセスするため）
     g_camera = &mainCamera;
     
-    // カメラの初期位置を調整
     mainCamera.pos = Vector3(0, 30, -80);
     mainCamera.rotation = Vector3(20, 0, 0);
 
+    // 【修正】レンダラーとワークスペースを先に初期化
     renderer.init();
     workspace.initScene(renderer.getSkyboxTextureID());
+
+    // 【修正】その後にLuaを初期化（この時点でcubesは存在する）
+    std::cout << "\n=== Lua console ===" << std::endl;
+    initLua();
+    std::cout << "========================\n" << std::endl;
 
     float lastTime = glfwGetTime();
     bool isFreeCam = false;
     bool pKeyBlock = false; 
-
-    bool firstFrame = true;
 
     while(!glfwWindowShouldClose(win)){
         float cur = glfwGetTime(); 
@@ -195,7 +182,6 @@ int main(){
             Vector3 targetV(0, player->velocity.y, 0);
             float speed = 50.0f;
 
-            //同時押しで速くなる。直すか直さないかは後で考えとく
             if(glfwGetKey(win,GLFW_KEY_W)) targetV += flatF * speed;
             if(glfwGetKey(win,GLFW_KEY_S)) targetV -= flatF * speed;
             if(glfwGetKey(win,GLFW_KEY_A)) targetV -= flatR * speed;
@@ -214,31 +200,6 @@ int main(){
             player->rotation.x = 0.0f; 
             player->rotation.z = 0.0f;
         }
-
-        // if (firstFrame) {
-        //     std::cout << "=== Debug Info ===" << std::endl;
-        //     std::cout << "Camera pos: " << mainCamera.pos.x << ", " << mainCamera.pos.y << ", " << mainCamera.pos.z << std::endl;
-        //     std::cout << "Camera rot: " << mainCamera.rotation.x << ", " << mainCamera.rotation.y << ", " << mainCamera.rotation.z << std::endl;
-        //     std::cout << "Number of cubes: " << workspace.cubes.size() << std::endl;
-        //     if (workspace.cubes.size() > 1) {
-        //         const Cube& ground = workspace.cubes[1];
-        //         std::cout << "Ground pos: " << ground.pos.x << ", " << ground.pos.y << ", " << ground.pos.z << std::endl;
-        //         std::cout << "Ground size: " << ground.size.x << ", " << ground.size.y << ", " << ground.size.z << std::endl;
-        //         std::cout << "Ground texture: " << (ground.texturePath.empty() ? "none" : ground.texturePath) << std::endl;
-        //     }
-        //     if (player) {
-        //         std::cout << "Player pos: " << player->pos.x << ", " << player->pos.y << ", " << player->pos.z << std::endl;
-        //     }
-        //     std::cout << "\n=== Controls ===" << std::endl;
-        //     std::cout << "P: Toggle Free Cam" << std::endl;
-        //     std::cout << "WASD: Move" << std::endl;
-        //     std::cout << "Q/E: Up/Down (Free Cam only)" << std::endl;
-        //     std::cout << "Arrow Keys: Rotate camera" << std::endl;
-        //     std::cout << "Right Click + Drag: Rotate camera" << std::endl;
-        //     std::cout << "Mouse Wheel: Zoom in/out" << std::endl;
-        //     std::cout << "==================" << std::endl;
-        //     firstFrame = false;
-        // }
 
         physics.simulate(workspace, dt);
         RunService::Heartbeat.fire(dt);
