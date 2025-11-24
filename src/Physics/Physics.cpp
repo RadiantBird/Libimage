@@ -69,6 +69,10 @@ void Physics::simulate(Workspace& ws, float dt) {
 
                     if (a.anchored && b.anchored) continue;
                     if (a.isSleeping && b.isSleeping) continue;
+                    
+                    // 【修正】衝突判定フラグのチェック
+                    // どちらかが衝突不可なら無視する
+                    if (!a.canCollide || !b.canCollide) continue;
 
                     if (!broadPhaseAABB(a, b)) continue;
 
@@ -97,28 +101,24 @@ void Physics::integrateAcceleration(Workspace& ws, float dt) {
 
     for (auto& c : ws.cubes) {
         if (c.anchored || c.isSleeping) continue;
+        
+        // 【修正】物理演算フラグのチェック
+        // 装飾用パーツなどはここでスキップされる
+        if (!c.simulated) continue;
 
         c.velocity += ws.gravity * dt;
 
-        // 減衰処理 (Damping)
         c.velocity *= 0.999f; 
-        
-        // 【修正1】角運動の極限減衰 (0.98f -> 0.90f)
-        // 外部から何も力が加わっていなくても、極めて積極的エネルギーを奪い、収束させる
         c.angularVelocity *= 0.90f; 
 
-        // 【追加】ごく低速時の強制停止 (Jitter/微振動を即座に殺す)
         if (c.velocity.lengthSquared() < 0.01f) c.velocity = Vector3(0,0,0);
         if (c.angularVelocity.lengthSquared() < 0.01f) c.angularVelocity = Vector3(0,0,0);
 
-
-        // 角速度のハードリミット (Max Angular Velocity)
         const float maxAngVel = 10.0f; 
         if (c.angularVelocity.lengthSquared() > maxAngVel * maxAngVel) {
             c.angularVelocity = c.angularVelocity.normalized() * maxAngVel;
         }
 
-        // スリープ判定
         if (!c.isPlayer) {
             if (c.velocity.lengthSquared() < sleepVelThreshold * sleepVelThreshold &&
                 c.angularVelocity.lengthSquared() < sleepAngThreshold * sleepAngThreshold) {
@@ -146,6 +146,9 @@ void Physics::integrateAcceleration(Workspace& ws, float dt) {
 void Physics::integrateVelocity(Workspace& ws, float dt) {
     for (auto& c : ws.cubes) {
         if (c.anchored || c.isSleeping) continue;
+        
+        // 【修正】物理演算フラグのチェック
+        if (!c.simulated) continue;
 
         c.pos += c.velocity * dt;
 
@@ -231,7 +234,6 @@ Vector3 Physics::findContactPoint(const Cube& a, const Cube& b, const Vector3& n
             float d = v.dot(n);
             if(d > maxDist) maxDist = d;
         }
-        // 接触点閾値を0.15fに維持
         const float threshold = 0.15f; 
         Vector3 sum(0,0,0);
         int count = 0;
@@ -274,7 +276,6 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
 
     float e = std::min(a.restitution, b.restitution);
     
-    // 低速時の反発抑制 (Stabilization)
     bool isStabilizing = false;
     if (std::abs(velAlongNormal) < 1.0f) { 
         e = 0.0f;
@@ -284,25 +285,21 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
     float j = -(1.0f + e) * velAlongNormal / invMassSum;
     Vector3 impulse = n * j;
 
-    // 速度更新
     if (!a.anchored) {
         a.velocity -= impulse * a.invMass;
-        // ここを微調整して発散を防ぐよ
         if (!isStabilizing) a.angularVelocity -= a.invInertiaTensorWorld * rA.cross(impulse);
-        else a.angularVelocity *= 0.95f; 
+        else a.angularVelocity *= 0.5f; 
     }
     if (!b.anchored) {
         b.velocity += impulse * b.invMass;
         if (!isStabilizing) b.angularVelocity += b.invInertiaTensorWorld * rB.cross(impulse);
-        else b.angularVelocity *= 0.95f;
+        else b.angularVelocity *= 0.5f;
     }
 
-    // 摩擦 (Friction)
     Vector3 t = relVel - n * velAlongNormal;
     if (t.lengthSquared() > 1e-6f) {
         t = t.normalized();
         
-        // 摩擦インパルスの簡易計算（安定性のための近似）
         float jt = -relVel.dot(t) / invMassSum; 
         
         float mu = std::sqrt(a.friction * b.friction);
@@ -313,9 +310,7 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
         
         if (!a.anchored) {
             a.velocity -= frictionImpulse * a.invMass;
-            // 【修正2-2】安定化時は摩擦トルクを完全に無視する (0.1fを維持)
             if(!isStabilizing) {
-                // 衝突が激しい時だけ、回転を大きく抑制しながら適用
                 a.angularVelocity -= (a.invInertiaTensorWorld * rA.cross(frictionImpulse)) * 0.1f; 
             }
         }
@@ -328,9 +323,7 @@ void Physics::resolveCollision(Cube& a, Cube& b, const Contact& contact) {
     }
 }
 
-// --- 位置補正 (沈み込み防止) ---
 void Physics::correctPosition(Cube& a, Cube& b, const Contact& contact) {
-    // 補正率をマイルドに維持 (0.2f)
     const float percent = 0.2f; 
     const float slop = 0.01f;
 

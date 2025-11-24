@@ -3,22 +3,30 @@
 #define WORKSPACE_HPP
 
 #include <vector>
+#include <memory>
 #include "GameData.hpp"
 #include "Instance.hpp"
+#include "Player.hpp"
 
 class Workspace : public Instance {
 public:
     std::vector<Cube> cubes;
-    size_t playerIndex;
+    Player* player;  // プレイヤーオブジェクト
     Vector3 gravity;
 
     Workspace();
+    ~Workspace();
     
     // シーンの初期化
     void initScene(unsigned int skyboxTexID);
 
-    // プレイヤーオブジェクトへの参照を取得
+    // プレイヤーのルートパーツを取得（後方互換性のため）
     Cube* getPlayer();
+    
+    // Playerオブジェクトを取得
+    Player* getPlayerObject() {
+        return player;
+    }
 
     // IsA のオーバーライド
     bool IsA(const std::string& className) const override {
@@ -32,6 +40,11 @@ public:
             if (cube.Name == name) {
                 return &cube;
             }
+        }
+        
+        // Player オブジェクトも検索
+        if (player && player->Name == name) {
+            return player;
         }
         
         // 通常のChildrenからも検索

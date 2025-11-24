@@ -63,6 +63,14 @@ struct Cube : public Instance {
     bool useTexture;
     bool anchored;
 
+    // --- 物理/衝突フラグ ---
+    bool canCollide; 
+    bool simulated;  
+
+    // --- 追加: 透明度 (0.0=不透明, 1.0=透明) ---
+    float transparency;
+    // ---------------------------------------
+
     // 物理パラメータ
     Vector3 velocity;
     Vector3 angularVelocity;
@@ -71,27 +79,30 @@ struct Cube : public Instance {
     Matrix3 invInertiaTensorLocal;
     Matrix3 invInertiaTensorWorld;
     
-    float restitution;  // ← 順序変更
-    float friction;     // ← 順序変更
+    float restitution;
+    float friction;
     
     bool isPlayer;
     bool onGround;
-    bool isSleeping;    // ← 順序変更
-    float sleepTimer;   // ← 順序変更
+    bool isSleeping;
+    float sleepTimer;
 
     Cube(Vector3 s, Vector3 p, Vector3 c, Vector3 r = Vector3(0,0,0),
          const std::string& texPath = "",
          unsigned int texID = 0, bool useTex = false, bool an = false, bool isPl = false,
-         std::string name = "Part")
+         std::string name = "Part",
+         bool canCol = true, bool sim = true,
+         float trans = 0.0f) // 引数追加
          : Instance(name, "Part"),
            size(s), pos(p), color(c), rotation(r), 
            texturePath(texPath), textureID(texID), useTexture(useTex), anchored(an), 
+           canCollide(canCol), simulated(sim), transparency(trans), // 初期化
            velocity(0,0,0), angularVelocity(0,0,0), 
            isPlayer(isPl), onGround(false), 
-           restitution(0.2f), friction(0.5f),  // ← 順序を修正
-           isSleeping(false), sleepTimer(0.0f)  // ← 最後に移動
+           restitution(0.2f), friction(0.5f),
+           isSleeping(false), sleepTimer(0.0f)
     {
-        if (an) {
+        if (an || !simulated) { 
             mass = 0.0f;
             invMass = 0.0f;
             invInertiaTensorLocal.setZero();
@@ -122,7 +133,7 @@ struct Cube : public Instance {
     }
 
     void updateInertiaWorld() {
-        if(anchored) return;
+        if(anchored || !simulated) return;
         Matrix3 R = Matrix3::rotate(rotation);
         invInertiaTensorWorld = R * invInertiaTensorLocal * R.transpose();
     }
@@ -137,7 +148,6 @@ struct Cube : public Instance {
         return velocity + angularVelocity.cross(r);
     }
 
-    // IsA のオーバーライド
     bool IsA(const std::string& className) const override {
         return className == "Part" || className == "BasePart" || Instance::IsA(className);
     }
@@ -154,19 +164,40 @@ struct CubeBuilder {
     bool _anchored = false;
     bool _isPlayer = false;
     std::string _name = "Part";
+    bool _canCollide = true;
+    bool _simulated = true;
+    
+    // 追加
+    float _transparency = 0.0f;
 
     CubeBuilder& size(float x, float y, float z) { _size = Vector3(x,y,z); return *this; }
+    CubeBuilder& size(const Vector3& v) { _size = v; return *this; }
     CubeBuilder& pos(float x, float y, float z) { _pos = Vector3(x,y,z); return *this; }
+    CubeBuilder& pos(const Vector3& v) { _pos = v; return *this; }
     CubeBuilder& color(float r, float g, float b) { _color = Vector3(r,g,b); return *this; }
+    CubeBuilder& color(const Vector3& v) { _color = v; return *this; }
     CubeBuilder& rotation(float x, float y, float z) { _rotation = Vector3(x,y,z); return *this; }
+    CubeBuilder& rotation(const Vector3& v) { _rotation = v; return *this; }
+
     CubeBuilder& texture(const std::string& path) { _texturePath = path; _useTex = true; return *this; }
     CubeBuilder& texture(unsigned int id) { _texID = id; _useTex = true; return *this; }
     CubeBuilder& setStatic() { _anchored = true; return *this; }
     CubeBuilder& setPlayer() { _isPlayer = true; return *this; }
     CubeBuilder& setName(const std::string& s) { _name = s; return *this; }
+    CubeBuilder& setCanCollide(bool enable) { _canCollide = enable; return *this; }
+    CubeBuilder& setSimulated(bool enable) { _simulated = enable; return *this; }
+
+    // 透明度設定メソッド
+    CubeBuilder& setTransparency(float t) { _transparency = t; return *this; }
 
     Cube build() {
-        return Cube(_size, _pos, _color, _rotation, _texturePath, _texID, _useTex, _anchored, _isPlayer, _name);
+        return Cube(
+            _size, _pos, _color, _rotation,
+            _texturePath, _texID, _useTex,
+            _anchored, _isPlayer, _name,
+            _canCollide, _simulated,
+            _transparency // 追加
+        );
     }
 };
 

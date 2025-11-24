@@ -2,10 +2,17 @@
 #include "Workspace.hpp"
 
 Workspace::Workspace() 
-    : Instance("Workspace", "Workspace"), // Instance コンストラクタ呼び出し
-      playerIndex(0), 
+    : Instance("Workspace", "Workspace"),
+      player(nullptr),
       gravity(0, -98.0f, 0) 
 {}
+
+Workspace::~Workspace() {
+    if (player) {
+        delete player;
+        player = nullptr;
+    }
+}
 
 Workspace* global_workspace = nullptr;
 
@@ -13,36 +20,32 @@ void Workspace::initScene(unsigned int skyboxTexID) {
     global_workspace = this;
     cubes.clear();
 
-    // 0: Player
-    cubes.push_back(
-        CubeBuilder()
-            .size(4, 6, 2)
-            .pos(0, 10, 0)
-            .setName("Player") // 名前を設定
-            .texture("assets/textures/noob.jpg")
-            .setPlayer()
-            .build()
-    );
-    playerIndex = 0;
+    // 【重要修正】メモリ再確保によるポインタ無効化を防ぐため、十分な数を予約する
+    // これをしないと、push_backした瞬間にHumanoidRootPartのポインタがゴミになります
+    cubes.reserve(128); 
 
-    // 1: Ground
+    // プレイヤーを作成
+    player = new Player("Player");
+    player->buildBody(cubes, Vector3(0, 10, 0));
+    
+    // Ground
     cubes.push_back(
         CubeBuilder()
             .size(512, 5, 512)
             .pos(0, -2.5, 0)
-            .setName("Ground") // 名前を設定
+            .setName("Ground")
             .color(255, 255, 255)
             .setStatic()
             .texture("assets/textures/rblx_grass.jpg")
             .build()
     );
     
-    // Others
+    // その他のオブジェクト
     cubes.push_back(
         CubeBuilder()
             .size(10, 10, 10)
             .pos(5, 10, 20)
-            .setName("FloppaCube") // 名前を設定
+            .setName("FloppaCube")
             .color(255, 255, 255)
             .texture("assets/textures/floppa_face_2048.jpg")
             .build()
@@ -52,7 +55,7 @@ void Workspace::initScene(unsigned int skyboxTexID) {
         CubeBuilder()
             .size(10, 10, 10)
             .pos(5, 15, 23)
-            .setName("SaladCat") // 名前を設定
+            .setName("SaladCat")
             .color(255, 255, 255)
             .texture("assets/textures/salad-cat.jpg")
             .build()
@@ -62,7 +65,7 @@ void Workspace::initScene(unsigned int skyboxTexID) {
         CubeBuilder()
             .size(5, 5, 5)
             .pos(-10, 10, 0)
-            .setName("GreenCube") // 名前を設定
+            .setName("GreenCube")
             .color(0, 150, 100)
             .build()
     );
@@ -71,15 +74,15 @@ void Workspace::initScene(unsigned int skyboxTexID) {
         CubeBuilder()
             .size(6, 6, 6)
             .pos(10, 50, 10)
-            .setName("RedCube") // 名前を設定
+            .setName("RedCube")
             .color(255, 0, 0)
             .build()
     );
 }
 
 Cube* Workspace::getPlayer() {
-    if (playerIndex < cubes.size()) {
-        return &cubes[playerIndex];
+    if (player && player->HumanoidRootPart) {
+        return player->HumanoidRootPart;
     }
     return nullptr;
 }

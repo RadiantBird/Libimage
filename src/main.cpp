@@ -1,3 +1,4 @@
+// makeコマンドで本当はもうここに書く必要ない気がするけど、一応:
 /* 
 g++ -I. -std=c++17 \
     -Isrc/Game -Isrc/Math -Isrc/Physics -Isrc/Render \
@@ -167,6 +168,8 @@ int main(){
         Vector3 f, r, u; 
         std::tie(f, r, u) = mainCamera.get_directions();
 
+        physics.simulate(workspace, dt);
+
         if (isFreeCam) {
             float s = 50.0f * dt;
             if(glfwGetKey(win,GLFW_KEY_W)) mainCamera.pos += f*s;
@@ -181,12 +184,19 @@ int main(){
             
             Vector3 targetV(0, player->velocity.y, 0);
             float speed = 50.0f;
+            
+            bool hasInput = false; // 入力があるかチェック
 
-            if(glfwGetKey(win,GLFW_KEY_W)) targetV += flatF * speed;
-            if(glfwGetKey(win,GLFW_KEY_S)) targetV -= flatF * speed;
-            if(glfwGetKey(win,GLFW_KEY_A)) targetV -= flatR * speed;
-            if(glfwGetKey(win,GLFW_KEY_D)) targetV += flatR * speed;
-            if(glfwGetKey(win,GLFW_KEY_SPACE) && player->onGround) targetV.y = 50.0f;
+            if(glfwGetKey(win,GLFW_KEY_W) == GLFW_PRESS) { targetV += flatF * speed; hasInput = true; }
+            if(glfwGetKey(win,GLFW_KEY_S) == GLFW_PRESS) { targetV -= flatF * speed; hasInput = true; }
+            if(glfwGetKey(win,GLFW_KEY_A) == GLFW_PRESS) { targetV -= flatR * speed; hasInput = true; }
+            if(glfwGetKey(win,GLFW_KEY_D) == GLFW_PRESS) { targetV += flatR * speed; hasInput = true; }
+            if(glfwGetKey(win,GLFW_KEY_SPACE) == GLFW_PRESS && player->onGround) { targetV.y = 50.0f; hasInput = true; }
+
+            // 【重要】入力があったらスリープ（省エネモード）を解除して物理演算を回す
+            if (hasInput) {
+                player->wakeUp();
+            }
 
             player->velocity.x += (targetV.x - player->velocity.x) * 0.1f;
             player->velocity.z += (targetV.z - player->velocity.z) * 0.1f;
@@ -194,14 +204,18 @@ int main(){
 
             // カメラ追従（ズーム距離を適用）
             mainCamera.pos = lookTarget - f * mouseState.zoomDistance;
+            
+            // プレイヤーの向きをカメラに合わせる
             player->rotation.y = mainCamera.rotation.y;
-
-            // X軸とZ軸の回転を強制的にリセット
             player->rotation.x = 0.0f; 
             player->rotation.z = 0.0f;
+            
+            // プレイヤーの体パーツを同期
+            if (workspace.getPlayerObject()) {
+                workspace.getPlayerObject()->updateBodyParts();
+            }
         }
-
-        physics.simulate(workspace, dt);
+        // ここから物理シミュレーション済み
         RunService::Heartbeat.fire(dt);
         renderer.render(workspace, mainCamera, lookTarget);
 
